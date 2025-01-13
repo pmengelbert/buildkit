@@ -16,8 +16,35 @@ import (
 
 type BuildFunc func(ctx context.Context, platform *ocispecs.Platform, idx int) (r client.Reference, img, baseImg *dockerspec.DockerOCIImage, err error)
 
-func (bc *Client) Build(ctx context.Context, fn BuildFunc) (*ResultBuilder, error) {
+type buildOpts struct {
+	formatFunc func(p ocispecs.Platform) string
+}
+
+func newBuildOpts(opts ...buildOptFunc) buildOpts {
+	cfg := buildOpts{}
+	for _, o := range opts {
+		o(&cfg)
+	}
+
+	if cfg.formatFunc == nil {
+		cfg.formatFunc = platforms.Format
+	}
+
+	return cfg
+}
+
+type buildOptFunc func(b *buildOpts)
+
+func WithFormatFunc(f func(ocispecs.Platform) string) buildOptFunc {
+	return func(b *buildOpts) {
+		b.formatFunc = f
+	}
+}
+
+func (bc *Client) BuildWithOpts(ctx context.Context, fn BuildFunc, opts ...buildOptFunc) (*ResultBuilder, error) {
 	res := client.NewResult()
+
+	cfg := newBuildOpts(opts...)
 
 	targets := make([]*ocispecs.Platform, 0, len(bc.TargetPlatforms))
 	for _, p := range bc.TargetPlatforms {
@@ -70,7 +97,7 @@ func (bc *Client) Build(ctx context.Context, fn BuildFunc) (*ResultBuilder, erro
 			}
 
 			p = platforms.Normalize(p)
-			k := platforms.Format(p)
+			k := cfg.formatFunc(p)
 
 			if bc.MultiPlatformRequested {
 				res.AddRef(k, ref)
@@ -99,6 +126,11 @@ func (bc *Client) Build(ctx context.Context, fn BuildFunc) (*ResultBuilder, erro
 		Result:       res,
 		expPlatforms: expPlatforms,
 	}, nil
+
+}
+
+func (bc *Client) Build(ctx context.Context, fn BuildFunc) (*ResultBuilder, error) {
+	return bc.BuildWithOpts(ctx, fn, WithFormatFunc(platforms.Format))
 }
 
 type ResultBuilder struct {
